@@ -16,6 +16,10 @@ from text_generation_server.utils.logits_process import (
 from text_generation_server.utils.watermark import WatermarkLogitsProcessor
 from transformers import PreTrainedTokenizerBase, RepetitionPenaltyLogitsProcessor
 
+from loguru import logger
+
+logger.add("/tmp/tokens.log", level="DEBUG")
+
 
 class NextTokenChooser:
     def __init__(
@@ -152,6 +156,7 @@ class HeterogeneousNextTokenChooser:
         self,
         dtype: torch.dtype,
         device: torch.device,
+        tokenizer: PreTrainedTokenizerBase,
         watermark: List[bool],
         temperature: List[float],
         repetition_penalty: List[float],
@@ -160,6 +165,7 @@ class HeterogeneousNextTokenChooser:
         typical_p: List[float],
         do_sample: List[bool],
         seeds: List[int],
+        lsp_hints: List[List[str]],
     ):
         warpers = []
 
@@ -207,6 +213,15 @@ class HeterogeneousNextTokenChooser:
 
         if any(do_sample):
             self.choice = HeterogeneousSampling(do_sample, seeds, device)
+        elif any([len(x) for x in lsp_hints]):
+            lsp_token_ids = []
+            for lsp_hint in lsp_hints:
+                token_ids = [tokenizer.encode(x, add_special_tokens=False) for x in lsp_hint]
+                padded_token_ids = torch.nn.utils.rnn.pad_sequence(
+                    [torch.tensor(x) for x in token_ids], batch_first=True
+                ).to(device)
+                lsp_token_ids.append(padded_token_ids)
+            self.choice = HeterogeneousGreedyWithLSP(lsp_token_ids)
         else:
             self.choice = Greedy()
 
@@ -260,6 +275,7 @@ class HeterogeneousNextTokenChooser:
         pb: List[generate_pb2.NextTokenChooserParameters],
         dtype: torch.dtype,
         device: torch.device,
+        tokenizer: PreTrainedTokenizerBase,
     ) -> "HeterogeneousNextTokenChooser":
         return HeterogeneousNextTokenChooser(
             watermark=[pb_.watermark for pb_ in pb],
@@ -270,8 +286,10 @@ class HeterogeneousNextTokenChooser:
             typical_p=[pb_.typical_p for pb_ in pb],
             do_sample=[pb_.do_sample for pb_ in pb],
             seeds=[pb_.seed for pb_ in pb],
+            lsp_hints=[pb_.lsp_hints for pb_ in pb],
             device=device,
             dtype=dtype,
+            tokenizer=tokenizer,
         )
 
 
@@ -292,6 +310,46 @@ class Sampling:
 class Greedy:
     def __call__(self, logits):
         return logits.argmax(dim=-1)
+
+
+class GreedyWithLSP:
+    def __init__(self, lsp_hints: torch.Tensor):
+        self.lsp_hints = lsp_hints
+
+    def __call__(self, logits):
+        try:
+            candidates = self.lsp_hints[:, 0]
+            next_token_id = candidates[logits[candidates].argmax(dim=-1)]
+            self.lsp_hints = self.lsp_hints[candidates == next_token_id][:, 1:]
+            return next_token_id
+        except Exception as e:
+            logger.error(e)
+            return logits.argmax(dim=-1)
+
+
+class HeterogeneousGreedyWithLSP:
+    def __init__(self, lsp_hints: List[torch.Tensor]):
+        self.lsp_hints = lsp_hints
+
+    def __call__(self, logits):
+        out = torch.empty(logits.shape[0], dtype=torch.int64, device=logits.device)
+        for i, lsp_hints in enumerate(self.lsp_hints):
+            if lsp_hints.numel():
+                out[i], lsp_hints = self.__call_lsp(logits[i], lsp_hints)
+            else:
+                out[i] = logits[i].argmax(dim=-1)
+            self.lsp_hints[i] = lsp_hints
+        return out
+
+    def __call_lsp(self, logits, lsp_hints: torch.Tensor):
+        try:
+            candidates = lsp_hints[:, 0]
+            next_token_id = candidates[logits[candidates].argmax(dim=-1)]
+            lsp_hints = lsp_hints[candidates == next_token_id][:, 1:]
+            return next_token_id, lsp_hints
+        except Exception as e:
+            logger.error(e)
+            return logits.argmax(dim=-1), lsp_hints
 
 
 class HeterogeneousSampling:

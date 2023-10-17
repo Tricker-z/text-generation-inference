@@ -146,6 +146,7 @@ impl Validation {
             watermark,
             decoder_input_details,
             top_n_tokens,
+            lsp_hints,
             ..
         } = request.parameters;
 
@@ -260,6 +261,7 @@ impl Validation {
             do_sample,
             seed,
             watermark,
+            lsp_hints,
         };
         let stopping_parameters = StoppingCriteriaParameters {
             max_new_tokens,

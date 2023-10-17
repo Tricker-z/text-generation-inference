@@ -41,6 +41,8 @@ class Parameters(BaseModel):
     decoder_input_details: bool = False
     # Return the N most likely tokens at each step
     top_n_tokens: Optional[int] = None
+    # LSP hints if any
+    lsp_hints: List[str] = []
 
     @validator("best_of")
     def valid_best_of(cls, field_value, values):

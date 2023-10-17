@@ -124,6 +124,7 @@ impl Client {
                     seed: 0,
                     repetition_penalty: 1.2,
                     watermark: true,
+                    lsp_hints: vec![],
                 }),
                 stopping_parameters: Some(StoppingCriteriaParameters {
                     max_new_tokens: 2,
