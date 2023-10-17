@@ -186,7 +186,7 @@ class FlashMistralBatch(FlashCausalLMBatch):
             max_length = max(max_length, input_length + max_new_tokens)
 
         next_token_chooser = HeterogeneousNextTokenChooser.from_pb(
-            next_token_chooser_parameters, dtype, device
+            next_token_chooser_parameters, dtype, device, tokenizer
         )
         start_slots = torch.tensor(start_slots, dtype=torch.int64)
 

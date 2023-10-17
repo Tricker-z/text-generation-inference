@@ -334,7 +334,7 @@ class HeterogeneousGreedyWithLSP:
     def __call__(self, logits):
         out = torch.empty(logits.shape[0], dtype=torch.int64, device=logits.device)
         for i, lsp_hints in enumerate(self.lsp_hints):
-            if lsp_hints.numel():
+            if lsp_hints.sum():
                 out[i], lsp_hints = self.__call_lsp(logits[i], lsp_hints)
             else:
                 out[i] = logits[i].argmax(dim=-1)
